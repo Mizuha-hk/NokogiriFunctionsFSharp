@@ -1,5 +1,4 @@
 ﻿namespace NameAndAid
-open System
 
 type RoomIdStreamingStatus() =
     member val room = "" with get, set
