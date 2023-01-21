@@ -3,7 +3,6 @@ namespace Company.Function
 open System
 open System.IO
 open System.Net
-open System.Text.Json.Serialization
 open System.Data
 open System.Linq
 open System.Threading.Tasks
@@ -18,64 +17,74 @@ open Microsoft.Azure.WebJobs
 open Microsoft.Azure.WebJobs.Extensions.Http
 open Microsoft.AspNetCore.Http
 open Microsoft.OpenApi.Models
-open Newtonsoft.Json
 open Microsoft.Extensions.Logging
+open Newtonsoft.Json
 open Azure
 open Azure.Core
 open Azure.Data.Tables
 open FSharp.Data.SqlClient
 open NameAndAid
 
-//名前と応援数に関するFunctions
-module ReturnAid =
-    //応援数を返す
+        
+
+//Functionsモジュール
+module Functions =
+    //応援数を返す (room -> [{room,id1,id2,isStreaming}])
     [<FunctionName("GetPoint")>]
-    let GetPointRun ([<HttpTrigger(AuthorizationLevel.Function, "get", Route = "getRoom/{room}")>]req: HttpRequest) ([<Sql("select * from room",
-                CommandType = System.Data.CommandType.Text,
-                //Parameters = "@Room={Query.room}",
-                ConnectionStringSetting = "Server=tcp:unity-streaming.database.windows.net,1433;Initial Catalog=Unitydb;Persist Security Info=False;User ID=Kizuku;Password=Nin/Doudayo;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;")>]data: IEnumerable<IdAndPoint>) (log: ILogger) =
+    let GetPointRun ([<HttpTrigger(AuthorizationLevel.Function, "get", Route = "getPoint/{roomid}")>]req: HttpRequest) ([<Sql("select * from dbo.[Room] where Room = @Room", CommandType = System.Data.CommandType.Text, Parameters = "@Room={roomid}", ConnectionStringSetting = "ConnectionSetting")>]data: IEnumerable<RoomIdStreamingStatus>) (log: ILogger) =
         async {
             log.LogInformation("Get Function processed a request.")
-            
 
             return OkObjectResult(data) :> IActionResult
         } |> Async.StartAsTask
 
-    [<FunctionName("DeleteData")>]
-    let DeleteDataRun ([<HttpTrigger(AuthorizationLevel.Function, "delete", Route = "DeleteFunction")>]req: HttpRequest) ([<Sql("DeleteItem", CommandType = System.Data.CommandType.StoredProcedure, 
-                Parameters = "@Id={Query.id}", ConnectionStringSetting = "SqlConnectionString")>]data: IEnumerable<IdAndPoint>) (log: ILogger) =
-        async {
-            log.LogInformation("Delete Function processed a request")
 
-            return OkObjectResult() :> IActionResult
-        } |> Async.StartAsTask
-
-//配信のルームや、配信状態、プレイヤー関係の状態に関するFunctions
-module Room =
-    //一意のroomIdを返すFunction
+    //一意のroomIdを返すFunction (null->string)
     [<FunctionName("GetRoomNum")>]
-    let GetRoomNumRun([<HttpTrigger(AuthorizationLevel.Function, "get", Route = null)>]req: HttpRequest) (log: ILogger) =
+    let GetRoomNumRun([<HttpTrigger(AuthorizationLevel.Function,"get", "post", Route = "GetRoomNum")>]req: HttpRequest) (log: ILogger) =
         async {
             log.LogInformation("Get Room Num processed a request.")
-
-            return OkObjectResult() :>IActionResult
+            
+            let NewRoomId = 
+                Guid.NewGuid().ToString()
+                               
+            return OkObjectResult(NewRoomId) :>IActionResult
         } |> Async.StartAsTask
     
-    //配信状態をtrueにするFunction
+    //配信状態をtrue("1")にするFunction 
     [<FunctionName("StartStreaming")>]
-    let StartStreamingRun([<HttpTrigger(AuthorizationLevel.Function, "post", Route = null)>]req: HttpRequest) (log: ILogger) =
+    let StartStreamingRun([<HttpTrigger(AuthorizationLevel.Function, "post", Route = "EnableStreaming")>]req: HttpRequest) ([<Sql("dbo.[Room]", ConnectionStringSetting = "ConnectionSetting")>]enabledata: IAsyncCollector<RoomIdStreamingStatus>) (log: ILogger) =
         async {
-            log.LogInformation("Get Room Num processed a request.")
+            log.LogInformation("Streaming enable processed a request.")
+            let streamRender = new StreamReader(req.Body)
+            let requestBody = streamRender.ReadToEndAsync() |> string
+            
 
-            return OkObjectResult() :>IActionResult
+            let roomInfo = JsonConvert.DeserializeObject<RoomIdStreamingStatus>(requestBody)
+            roomInfo.isStreaming <- "1"
+            let! result1 = enabledata.AddAsync(roomInfo) |> Async.AwaitTask
+            let! result2 = enabledata.FlushAsync() |> Async.AwaitTask
+            result1 
+            result2
+
+            return OkObjectResult("Streaming is now avalable") :>IActionResult
         } |> Async.StartAsTask
     
-    //配信状態をfalseにするFunction
+    //配信状態をfalse("0")にするFunction
     [<FunctionName("StopStreaming")>]
-    let StopStreamingRun([<HttpTrigger(AuthorizationLevel.Function, "post", Route = null)>]req: HttpRequest) (log: ILogger) =
+    let StopStreamingRun([<HttpTrigger(AuthorizationLevel.Function, "post", Route = "DisableStreaming")>]req: HttpRequest) ([<Sql("dbo.[Room]", ConnectionStringSetting = "ConnectionSetting")>]enabledata: IAsyncCollector<RoomIdStreamingStatus>) (log: ILogger) =
         async {
-            log.LogInformation("Get Room Num processed a request.")
+            log.LogInformation("Streaming enable processed a request.")
+            let streamRender = new StreamReader(req.Body)
+            let requestBody = streamRender.ReadToEndAsync() |> string
 
-            return OkObjectResult() :>IActionResult
+            let roomInfo = JsonConvert.DeserializeObject<RoomIdStreamingStatus>(requestBody)
+            roomInfo.isStreaming <- "0"
+            let! result1 = enabledata.AddAsync(roomInfo) |> Async.AwaitTask
+            let! result2 = enabledata.FlushAsync() |> Async.AwaitTask
+            result1 
+            result2
+
+            return OkObjectResult("Streaming is now disable") :>IActionResult
         } |> Async.StartAsTask
 
